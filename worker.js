@@ -20,7 +20,7 @@ export default {
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,PUT,OPTIONS",
+  "Access-Control-Allow-Methods": "GET,PUT,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
@@ -58,12 +58,12 @@ function computeDay(st, date) {
     if (r.start && date < r.start) return;
     if (r.end && date > r.end) return;
     const c = map[r.catId] || {};
-    out.push({ title: r.title, cat: c.name || "", color: c.color || "#888", time: r.time || "", done: !!rd[r.id + "|" + date] });
+    out.push({ title: r.title, cat: c.name || "", color: c.color || "#888", time: r.time || "", done: !!rd[r.id + "|" + date], key: "r:" + r.id });
   });
   (st.todos || []).forEach((t) => {
     if (t.date !== date || t.archived) return;
     const c = map[t.catId] || {};
-    out.push({ title: t.title, cat: c.name || "", color: c.color || "#888", time: t.time || "", done: !!t.done });
+    out.push({ title: t.title, cat: c.name || "", color: c.color || "#888", time: t.time || "", done: !!t.done, key: "t:" + t.id });
   });
   out.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
   return out;
@@ -117,6 +117,37 @@ async function handleApi(request, env, url) {
     const items = computeDay(st, date);
     const remaining = items.filter((i) => !i.done).length;
     return json({ date, total: items.length, done: items.length - remaining, remaining, items });
+  }
+
+  // Toggle one item's done state (from the widget).
+  //   POST /api/toggle?key=<code>   body { key: "t:<id>" | "r:<rid>", date: "YYYY-MM-DD" }
+  if (url.pathname === "/api/toggle" && request.method === "POST") {
+    const row = await env.DB.prepare("SELECT data FROM states WHERE id = ?").bind(space).first();
+    if (!row) return json({ error: "no state" }, 404);
+    let st;
+    try { st = JSON.parse(row.data); } catch { return json({ error: "bad state" }, 500); }
+    let body;
+    try { body = await request.json(); } catch { return json({ error: "bad json" }, 400); }
+    const key = String(body?.key || "");
+    const date = String(body?.date || kstToday());
+    let done = null;
+    if (key.startsWith("t:")) {
+      const id = key.slice(2);
+      const t = (st.todos || []).find((x) => x.id === id);
+      if (t) { t.done = !t.done; done = t.done; }
+    } else if (key.startsWith("r:")) {
+      const rid = key.slice(2);
+      st.routineDone = st.routineDone || {};
+      const k = rid + "|" + date;
+      if (st.routineDone[k]) { delete st.routineDone[k]; done = false; }
+      else { st.routineDone[k] = true; done = true; }
+    }
+    if (done === null) return json({ error: "item not found" }, 404);
+    const updated = Date.now();
+    st.updated = updated;
+    await env.DB.prepare("UPDATE states SET data = ?, updated = ? WHERE id = ?")
+      .bind(JSON.stringify(st), updated, space).run();
+    return json({ ok: true, done, updated });
   }
 
   return json({ error: "not found" }, 404);
