@@ -834,6 +834,7 @@ matchMedia("(prefers-color-scheme:dark)").addEventListener("change",()=>{if(stat
 
 renderAll();
 if(syncKey())pullRemote();
+(function(){try{const p=new URLSearchParams(location.search);const v=p.get("view");if(v&&["home","routine","settings"].includes(v))goView(v);if(p.get("add")==="1")openTodo(null,false);}catch(e){}})();
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&syncKey())pullRemote();});
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));}
 </script>

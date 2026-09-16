@@ -36,12 +36,46 @@ async function sha256(str) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// KST (UTC+9) date as YYYY-MM-DD
+function kstToday() {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);
+  return d.getUTCFullYear() + "-" +
+    String(d.getUTCMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getUTCDate()).padStart(2, "0");
+}
+
+// Mirror of the app's "items for a day": routines (Mon-first, within range) + todos, minus archived.
+function computeDay(st, date) {
+  if (!st) return [];
+  const cats = st.categories || [];
+  const map = Object.fromEntries(cats.map((c) => [c.id, c]));
+  const wd = (new Date(date + "T00:00:00Z").getUTCDay() + 6) % 7; // Monday = 0
+  const rd = st.routineDone || {};
+  const out = [];
+  (st.routines || []).forEach((r) => {
+    if (r.manual) return;
+    if (!(r.days || []).includes(wd)) return;
+    if (r.start && date < r.start) return;
+    if (r.end && date > r.end) return;
+    const c = map[r.catId] || {};
+    out.push({ title: r.title, cat: c.name || "", color: c.color || "#888", time: r.time || "", done: !!rd[r.id + "|" + date] });
+  });
+  (st.todos || []).forEach((t) => {
+    if (t.date !== date || t.archived) return;
+    const c = map[t.catId] || {};
+    out.push({ title: t.title, cat: c.name || "", color: c.color || "#888", time: t.time || "", done: !!t.done });
+  });
+  out.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+  return out;
+}
+
 async function handleApi(request, env, url) {
   if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (!env.DB) return json({ error: "D1 binding 'DB' is not configured" }, 500);
 
   const auth = request.headers.get("Authorization") || "";
-  const code = auth.replace(/^Bearer\s+/i, "").trim();
+  let code = auth.replace(/^Bearer\s+/i, "").trim();
+  if (!code) code = (url.searchParams.get("key") || "").trim(); // widgets can pass ?key=
   if (code.length < 4) return json({ error: "unauthorized" }, 401);
   const space = await sha256("todomate:" + code);
 
@@ -71,6 +105,18 @@ async function handleApi(request, env, url) {
         .run();
       return json({ ok: true, updated });
     }
+  }
+
+  // Compact summary of today's items, for a home-screen widget / automation.
+  //   GET /api/today?key=<code>&date=YYYY-MM-DD   (date optional, defaults to KST today)
+  if (url.pathname === "/api/today" && request.method === "GET") {
+    const row = await env.DB.prepare("SELECT data FROM states WHERE id = ?").bind(space).first();
+    let st = null;
+    if (row) { try { st = JSON.parse(row.data); } catch { st = null; } }
+    const date = url.searchParams.get("date") || kstToday();
+    const items = computeDay(st, date);
+    const remaining = items.filter((i) => !i.done).length;
+    return json({ date, total: items.length, done: items.length - remaining, remaining, items });
   }
 
   return json({ error: "not found" }, 404);
