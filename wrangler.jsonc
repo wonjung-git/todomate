@@ -1,0 +1,23 @@
+{
+  // Keep this name = your existing worker name so the URL stays the same
+  // (e.g. todomate.won-jung0612.workers.dev).
+  "name": "todomate",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-01",
+
+  // Serves the SPA. Put index.html inside a folder called "public".
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+
+  // Free D1 (SQLite) database. Paste the database_id printed by
+  // `wrangler d1 create todomate` into the field below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "todomate",
+      "database_id": "PASTE_YOUR_DATABASE_ID_HERE"
+    }
+  ]
+}

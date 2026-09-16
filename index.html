@@ -10,6 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet" />
 <style>
 :root{
+  color-scheme:light;
   --bg:#f4f4f6; --surface:#ffffff; --pill:#ececef; --line:#e6e6ea;
   --text:#1c1c1f; --text-2:#7c7c85; --text-3:#adadb6;
   --clover-empty:#d7d7dd; --cbox-off:#cfcfd6; --badge-bg:#d0d0d8; --badge-text:#5a5a63;
@@ -17,17 +18,21 @@
   --nav-h:62px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
   --bg:#000000; --surface:#0f0f12; --pill:#26262a; --line:#1d1d20;
   --text:#f2f2f5; --text-2:#9a9aa2; --text-3:#5c5c66;
   --clover-empty:#2e2e33; --cbox-off:#3a3a40; --badge-bg:#2e2e34; --badge-text:#cfcfd6;
   --today-circle:#ffffff; --today-circle-text:#000; --accent:#4a90e2;
 }}
 :root[data-theme="dark"]{
+  color-scheme:dark;
   --bg:#000000; --surface:#0f0f12; --pill:#26262a; --line:#1d1d20;
   --text:#f2f2f5; --text-2:#9a9aa2; --text-3:#5c5c66;
   --clover-empty:#2e2e33; --cbox-off:#3a3a40; --badge-bg:#2e2e34; --badge-text:#cfcfd6;
   --today-circle:#ffffff; --today-circle-text:#000; --accent:#4a90e2;
 }
+
+:root[data-theme="light"]{color-scheme:light;}
 
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{margin:0; height:100%;}
@@ -185,7 +190,7 @@ svg.clover{display:block;}
 .sheet-body{padding:12px 22px 26px;}
 .field{margin-bottom:16px;}
 .field label{display:block;font-size:12px;font-weight:700;color:var(--text-3);margin-bottom:8px;}
-.field input[type=text],.field input[type=time]{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px 14px;outline:none;background:var(--pill);}
+.field input[type=text],.field input[type=time],.field input[type=date]{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px 14px;outline:none;background:var(--pill);color:var(--text);}
 .field input:focus{border-color:var(--accent);}
 .swatches{display:flex;flex-wrap:wrap;gap:11px;}
 .swatch{width:32px;height:32px;border-radius:50%;cursor:pointer;box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line);transition:transform .1s;}
@@ -283,6 +288,9 @@ svg.clover{display:block;}
           <div class="set-row"><div><div class="lbl">다크 모드</div><div class="desc">어두운 테마로 전환</div></div><div class="switch" id="darkSwitch" data-act="toggle-dark"></div></div></div>
         <div class="set-block"><div class="side-label">보관함</div>
           <div class="set-row"><div><div class="lbl">보관한 할 일</div><div class="desc">보관함으로 옮긴 할 일을 확인·복원</div></div><button class="btn" data-act="open-archive">열기</button></div></div>
+        <div class="set-block"><div class="side-label">동기화</div>
+          <div class="set-row"><div><div class="lbl">기기 간 동기화</div><div class="desc" id="syncDesc">서버에 저장해 여러 기기에서 같은 기록을 봐요</div></div><button class="btn" data-act="sync-setup" id="syncBtn">설정</button></div>
+          <div class="set-row" id="syncNowRow" style="display:none"><div><div class="lbl">지금 동기화</div><div class="desc" id="syncStatus">—</div></div><button class="btn" data-act="sync-now">새로고침</button></div></div>
         <div class="set-block"><div class="side-label">데이터</div>
           <div class="set-row"><div><div class="lbl">내보내기</div><div class="desc">모든 기록을 JSON으로 저장</div></div><button class="btn" data-act="export">내보내기</button></div>
           <div class="set-row"><div><div class="lbl">가져오기</div><div class="desc">JSON에서 복원</div></div><button class="btn" data-act="import">가져오기</button></div>
@@ -340,12 +348,44 @@ function cssVar(n){return getComputedStyle(document.documentElement).getProperty
 
 /* ---- storage ---- */
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.categories)return norm(s);}catch(e){}return seed();}
-function norm(s){s.categories||=[];s.todos||=[];s.routines||=[];s.routineDone||={};s.hidden||=[];s.theme||="auto";
+function norm(s){s.categories||=[];s.todos||=[];s.routines||=[];s.routineDone||={};s.hidden||=[];s.theme||="auto";s.updated??=0;
   s.profile||={name:"터모",bio:"프로필에 자기소개를 입력해보세요"};
   s.todos.forEach(t=>{t.memo??="";t.sec??=0;t.archived??=false;t.time??="";});
   s.routines.forEach(r=>{r.days||=[];r.time??="";r.memo??="";r.manual??=false;r.start??="";r.end??="";});
   return s;}
-function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+function save(){state.updated=Date.now();localStorage.setItem(KEY,JSON.stringify(state));scheduleSync();}
+function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(state));}
+
+/* ---- cloud sync (Cloudflare D1 via /api/state) ---- */
+function syncKey(){return localStorage.getItem("todomate:synckey")||"";}
+function setSyncKey(k){k?localStorage.setItem("todomate:synckey",k):localStorage.removeItem("todomate:synckey");}
+function nowStr(){const d=new Date();return pad(d.getHours())+":"+pad(d.getMinutes());}
+function setSyncStatus(t){const e=$("#syncStatus");if(e)e.textContent=t;}
+let syncT;
+function scheduleSync(){if(!syncKey())return;clearTimeout(syncT);syncT=setTimeout(pushRemote,800);}
+async function pushRemote(){const k=syncKey();if(!k)return;
+  try{const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+k},body:JSON.stringify({data:state,updated:state.updated||Date.now()})});
+    setSyncStatus(r.ok?"동기화됨 · "+nowStr():"서버 오류 ("+r.status+")");}catch(e){setSyncStatus("오프라인 (로컬 저장됨)");}}
+async function pullRemote(){const k=syncKey();if(!k)return;
+  setSyncStatus("동기화 중…");
+  try{const r=await fetch("/api/state",{headers:{"Authorization":"Bearer "+k}});
+    if(!r.ok){setSyncStatus("서버 오류 ("+r.status+")");return;}
+    const j=await r.json();
+    if(j&&j.data&&(j.updated||0)>(state.updated||0)){state=norm(j.data);pickCat=state.categories[0]?.id||null;saveLocalOnly();renderAll();renderSettings();setSyncStatus("동기화됨 · "+nowStr());}
+    else if(j&&!j.data){await pushRemote();}
+    else{setSyncStatus("동기화됨 · "+nowStr());}
+  }catch(e){setSyncStatus("오프라인 (로컬 저장됨)");}}
+function openSyncSetup(){
+  const cur=syncKey();
+  sheet('<div class="sheet-head">기기 간 동기화</div><div class="sheet-body">'+
+    '<p style="font-size:13px;color:var(--text-2);line-height:1.6;margin:0 0 14px">동기화 코드를 정하고 다른 기기에도 <b>같은 코드</b>를 입력하면 기록이 서버(Cloudflare)에서 공유돼요. 이 코드가 곧 비밀번호이니 남에게 알려주지 마세요.</p>'+
+    '<div class="field"><label>동기화 코드</label><input type="text" id="skey" placeholder="예) my-secret-1234" value="'+esc(cur)+'"></div>'+
+    '<div class="sheet-foot">'+(cur?'<button class="btn danger" id="skOff" style="border:1px solid var(--line)">연결 해제</button>':'')+'<button class="btn" data-x>취소</button><button class="btn primary" id="skSave">저장</button></div></div>');
+  const R=$("#modalRoot");R.querySelector("[data-x]").onclick=closeSheet;
+  if(cur)R.querySelector("#skOff").onclick=()=>{setSyncKey("");renderSettings();closeSheet();toast("동기화를 껐어요");};
+  R.querySelector("#skSave").onclick=async()=>{const v=R.querySelector("#skey").value.trim();if(v.length<4){toast("4자 이상 입력하세요");return;}setSyncKey(v);renderSettings();closeSheet();toast("동기화를 켰어요");await pullRemote();};
+  setTimeout(()=>R.querySelector("#skey").focus(),60);
+}
 function seed(){
   const c=(n,i)=>({id:uid(),name:n,color:PALETTE[i]});
   const 일정=c("일정",0),기타=c("기타",6),공부=c("공부",5),운동=c("운동",3),연구=c("연구",7);
@@ -503,6 +543,10 @@ function renderSettings(){
     '<button class="del-x" style="opacity:1" data-act="del-cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></div>'
   ).join("")||'<div class="grp-empty">카테고리가 없어요.</div>';
   $("#darkSwitch").classList.toggle("on",isDark());
+  const on=!!syncKey();
+  const sb=$("#syncBtn");if(sb)sb.textContent=on?"코드 변경":"설정";
+  const sd=$("#syncDesc");if(sd)sd.textContent=on?"같은 코드를 입력한 기기끼리 자동 동기화돼요":"서버에 저장해 여러 기기에서 같은 기록을 봐요";
+  const sr=$("#syncNowRow");if(sr)sr.style.display=on?"":"none";
 }
 
 /* ---- nav ---- */
@@ -535,6 +579,8 @@ document.addEventListener("click",e=>{
     case"edit-routine":openRoutine(rt.dataset.rid);break;
     case"del-routine":confirmRoutineDelete(rt.dataset.rid);break;
     case"open-archive":openArchive();break;
+    case"sync-setup":openSyncSetup();break;
+    case"sync-now":pullRemote();break;
     case"add-cat":openCat();break;
     case"set-color":openColor(ci.dataset.id);break;
     case"del-cat":delCat(ci.dataset.id);break;
@@ -781,6 +827,8 @@ let toastT;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add
 matchMedia("(prefers-color-scheme:dark)").addEventListener("change",()=>{if(state.theme==="auto"){applyTheme();renderProfile();renderCalendar();renderList();renderSettings();}});
 
 renderAll();
+if(syncKey())pullRemote();
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&syncKey())pullRemote();});
 </script>
 </body>
 </html>
