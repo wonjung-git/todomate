@@ -116,7 +116,8 @@ async function handleApi(request, env, url) {
     const date = url.searchParams.get("date") || kstToday();
     const items = computeDay(st, date);
     const remaining = items.filter((i) => !i.done).length;
-    return json({ date, total: items.length, done: items.length - remaining, remaining, items });
+    const categories = (st && st.categories ? st.categories : []).map((c) => ({ name: c.name, color: c.color }));
+    return json({ date, total: items.length, done: items.length - remaining, remaining, items, categories });
   }
 
   // Toggle one item's done state (from the widget).

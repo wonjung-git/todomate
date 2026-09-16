@@ -371,7 +371,8 @@ let syncT;
 function scheduleSync(){if(!syncKey())return;clearTimeout(syncT);syncT=setTimeout(pushRemote,800);}
 async function pushRemote(){const k=syncKey();if(!k)return;
   try{const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+k},body:JSON.stringify({data:state,updated:state.updated||Date.now()})});
-    setSyncStatus(r.ok?"동기화됨 · "+nowStr():"서버 오류 ("+r.status+")");}catch(e){setSyncStatus("오프라인 (로컬 저장됨)");}}
+    setSyncStatus(r.ok?"동기화됨 · "+nowStr():"서버 오류 ("+r.status+")");
+    if(r.ok && window.AndroidTodo && window.AndroidTodo.onChanged){try{window.AndroidTodo.onChanged();}catch(e){}}}catch(e){setSyncStatus("오프라인 (로컬 저장됨)");}}
 async function pullRemote(){const k=syncKey();if(!k)return;
   setSyncStatus("동기화 중…");
   try{const r=await fetch("/api/state",{headers:{"Authorization":"Bearer "+k}});
